@@ -138,17 +138,35 @@ st.markdown("""
         align-items: center;
         justify-content: center;
     }
+    .live-badge {
+        background-color: #10b981;
+        color: white;
+        font-size: 0.75rem;
+        font-weight: bold;
+        padding: 2px 8px;
+        border-radius: 4px;
+        display: inline-block;
+        margin-bottom: 6px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. NHL 32개 팀 데이터베이스 및 6.0 WUV 모델 규격
+# 2. NHL 32개 팀 정적 지표 & 트라이코드 맵핑
 # -----------------------------------------------------------------------------
-# 6.0 WUV 구성:
-# - 골리 Unit (30% 가중치 = 최대 1.8 UV): GSAx/60 및 SV% 기반
-# - 탑 유닛 (45% 가중치 = 최대 2.7 UV): 1~2라인 F + 1페어 D, xGF% 및 P/60 기반
-# - 뎁스 유닛 (25% 가중치 = 최대 1.5 UV): 3~4라인 F + 2~3페어 D, CF% 및 수비 억제력(xGA/60) 기반
-# - 홈 어드밴티지: +0.20 UV 적용
+TRI_TO_KOR = {
+    "BOS": "보스턴 브루인스", "NYR": "뉴욕 레인저스", "FLA": "플로리다 팬서스",
+    "CAR": "캐롤라이나 허리케인스", "EDM": "에드먼턴 오일러스", "DAL": "달라스 스타스",
+    "COL": "콜로라도 애벌랜치", "VGK": "베가스 골든나이츠", "TOR": "토론토 메이플리프스",
+    "TBL": "탬파베이 라이트닝", "WPG": "위니펙 제츠", "VAN": "밴쿠버 캐넉스",
+    "NJD": "뉴저지 데빌스", "LAK": "로스앤젤레스 킹스", "NSH": "내슈빌 프레더터스",
+    "MIN": "미네소타 와일드", "NYI": "뉴욕 아일랜더스", "PIT": "피츠버그 펭귄스",
+    "WSH": "워싱턴 캐피털스", "PHI": "필라델피아 플라이어스", "DET": "디트로이트 레드윙스",
+    "BUF": "버팔로 세이버스", "OTT": "오타와 세네터스", "MTL": "몬트리올 카나디엔스",
+    "CGY": "캘거리 플레임스", "SEA": "시애틀 크라켄", "STL": "세인트루이스 블루스",
+    "UTA": "유타 하키클럽", "CHI": "시카고 블랙호크스", "ANA": "애너하임 덕스",
+    "SJS": "산호세 샤크스", "CBJ": "콜럼버스 블루재키츠"
+}
 
 TEAMS_DATA = {
     "보스턴 브루인스": {
@@ -348,7 +366,6 @@ TEAMS_DATA = {
 # 팀 UV 계산 함수 (6.0 WUV 스케일)
 def calculate_team_wuv(team_name):
     if team_name not in TEAMS_DATA:
-        # Fallback default values
         g_uv = 1.35
         t_uv = 2.05
         d_uv = 1.10
@@ -365,19 +382,16 @@ def calculate_team_wuv(team_name):
         d = team_info["depth_unit"]
 
         # 1. 골리 UV (Max 1.8 UV, 가중치 30%)
-        # SV% (0.890~0.925 스케일) + GSAx/60 (0.0~0.6 스케일)
         g_norm = 0.5 * ((g["sv_pct"] - 0.890) / 0.035) + 0.5 * (g["gsax_60"] / 0.60)
         g_norm = max(0.1, min(1.0, g_norm))
         g_uv = round(1.8 * g_norm, 2)
 
         # 2. 탑 유닛 UV (Max 2.7 UV, 가중치 45%)
-        # xGF% (48.0~60.0%) + P/60 (2.0~3.5)
         t_norm = 0.5 * ((t["xgf_pct"] - 48.0) / 12.0) + 0.5 * ((t["p_60"] - 2.0) / 1.5)
         t_norm = max(0.1, min(1.0, t_norm))
         t_uv = round(2.7 * t_norm, 2)
 
         # 3. 뎁스 유닛 UV (Max 1.5 UV, 가중치 25%)
-        # CF% (45.0~55.0%) + 수비 억제력 (xGA/60 2.80~2.00 역산)
         d_norm = 0.5 * ((d["cf_pct"] - 45.0) / 10.0) + 0.5 * ((2.80 - d["xga_60"]) / 0.80)
         d_norm = max(0.1, min(1.0, d_norm))
         d_uv = round(1.5 * d_norm, 2)
@@ -453,18 +467,52 @@ def predict_matchup(home_team, away_team):
     }
 
 # -----------------------------------------------------------------------------
-# 3. 데이터베이스 관리 & 히스토리 백업
+# 3. Live NHL API 실시간 일정 조회 & 데이터베이스 관리
 # -----------------------------------------------------------------------------
+@st.cache_data(ttl=600)
+def fetch_live_nhl_schedule(date_str):
+    url = f"https://api-web.nhle.com/v1/schedule/{date_str}"
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            games = []
+            for gw in data.get("gameWeek", []):
+                if gw.get("date") == date_str:
+                    for g in gw.get("games", []):
+                        h_tri = g.get("homeTeam", {}).get("abbrev")
+                        a_tri = g.get("awayTeam", {}).get("abbrev")
+                        
+                        h_kor = TRI_TO_KOR.get(h_tri, g.get("homeTeam", {}).get("commonName", {}).get("default", "홈팀"))
+                        a_kor = TRI_TO_KOR.get(a_tri, g.get("awayTeam", {}).get("commonName", {}).get("default", "원정팀"))
+                        
+                        state = g.get("gameState")
+                        h_score = g.get("homeTeam", {}).get("score")
+                        a_score = g.get("awayTeam", {}).get("score")
+                        
+                        games.append({
+                            "home_team": h_kor,
+                            "away_team": a_kor,
+                            "home_tri": h_tri,
+                            "away_tri": a_tri,
+                            "state": state,
+                            "home_score": h_score,
+                            "away_score": a_score
+                        })
+            return games
+    except Exception:
+        pass
+    return []
+
 def generate_sample_historical_predictions():
     records = []
-    # 2026-08-01 ~ 2026-08-28 히스토리 데이터 구축
     start_date = datetime.strptime("2026-08-01", "%Y-%m-%d")
     teams_keys = list(TEAMS_DATA.keys())
     
     np.random.seed(42)
     game_id_counter = 1
     
-    for i in range(29):
+    for i in range(28):
         curr_date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
         num_games = np.random.randint(3, 7)
         shuffled = np.random.choice(teams_keys, size=num_games*2, replace=False)
@@ -475,14 +523,10 @@ def generate_sample_historical_predictions():
             
             res = predict_matchup(h_team, a_team)
             
-            # 예측 정확도 57.5% 내외 유지
             is_correct_val = 1 if np.random.rand() < 0.58 else 0
             if is_correct_val == 1:
                 act_winner = res["predicted_winner"]
-                if act_winner == h_team:
-                    act_score = f"{res['home_exp_g']} : {res['away_exp_g']}"
-                else:
-                    act_score = f"{res['home_exp_g']} : {res['away_exp_g']}"
+                act_score = f"{res['home_exp_g']} : {res['away_exp_g']}" if act_winner == h_team else f"{res['away_exp_g']} : {res['home_exp_g']}"
             else:
                 act_winner = a_team if res["predicted_winner"] == h_team else h_team
                 act_score = f"{res['away_exp_g']} : {res['home_exp_g']}"
@@ -496,7 +540,7 @@ def generate_sample_historical_predictions():
             ))
             game_id_counter += 1
 
-    # 2026-08-29 (오늘 예정 경기)
+    # 2026-08-29 매치업
     today_str = "2026-08-29"
     today_matchups = [
         ("보스턴 브루인스", "뉴욕 레인저스"),
@@ -657,7 +701,7 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 6. [메인] 당일 NHL 전 경기 매치업 카드 그리드
+# 6. [메인] 당일 NHL 전 경기 매치업 카드 그리드 (Live API + Database)
 # -----------------------------------------------------------------------------
 st.header("🏒 NHL 당일 매치업 AI 승부예측 카드")
 
@@ -668,19 +712,28 @@ default_date_target = datetime.strptime("2026-08-29", "%Y-%m-%d").date()
 default_val = default_date_target if default_date_target in unique_dates else unique_dates[0]
 
 selected_date = st.date_input("🗓️ 확인하고 싶은 경기 날짜를 선택하세요:", value=default_val)
-filtered_df = df[df['date_dt'] == selected_date].copy().reset_index(drop=True)
+selected_date_str = selected_date.strftime("%Y-%m-%d")
 
-if filtered_df.empty:
-    st.warning("⚠️ 선택하신 날짜에는 예정된 NHL 경기가 없습니다.")
+# Live API 조회 시도
+live_games = fetch_live_nhl_schedule(selected_date_str)
+
+if live_games:
+    st.markdown(f"<span class='live-badge'>📡 NHL Official Live API 실시간 데이터 연동 중 ({len(live_games)} 경기)</span>", unsafe_allow_html=True)
+    display_matchups = [(g['home_team'], g['away_team']) for g in live_games]
 else:
-    # 2열 카드 그리드 배치
+    filtered_df = df[df['date_dt'] == selected_date].copy().reset_index(drop=True)
+    if not filtered_df.empty:
+        display_matchups = [(r['home_team'], r['visit_team']) for _, r in filtered_df.iterrows()]
+    else:
+        display_matchups = []
+
+if not display_matchups:
+    st.warning(f"⚠️ {selected_date_str} 날짜에는 예정된 NHL 경기가 없습니다. (NHL 개막 일정: 2026년 9월 29일~)")
+else:
     grid_cols = st.columns(2)
     
-    for idx, row in filtered_df.iterrows():
+    for idx, (home_team, away_team) in enumerate(display_matchups):
         col_target = grid_cols[idx % 2]
-        
-        home_team = row['home_team']
-        away_team = row['visit_team']
         
         pred = predict_matchup(home_team, away_team)
         h_info = pred['home_info']
@@ -744,8 +797,8 @@ st.markdown("---")
 # -----------------------------------------------------------------------------
 st.header("📋 상세 경기 라인업 분석기 & 6.0 WUV 차트")
 
-if not filtered_df.empty:
-    game_options = [f"{r['visit_team']} vs {r['home_team']}" for idx, r in filtered_df.iterrows()]
+if display_matchups:
+    game_options = [f"{a} vs {h}" for h, a in display_matchups]
     selected_game_str = st.selectbox("분석할 경기를 선택하세요:", options=game_options)
     
     away_sel_name, home_sel_name = selected_game_str.split(" vs ")
