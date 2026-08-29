@@ -540,6 +540,11 @@ def load_data():
         )
     """)
     conn.commit()
+
+    # 서버에 잔존하던 과거 비시즌 샘플 데이터 강제 삭제
+    cursor.execute("DELETE FROM predictions WHERE date LIKE '2026-08%'")
+    conn.commit()
+
     df = pd.read_sql("SELECT * FROM predictions ORDER BY date ASC, id ASC", conn)
     conn.close()
     return df
@@ -550,7 +555,7 @@ df = load_data()
 # 4. [상단] 누적 예측 성적표 & 100경기 트래킹
 # -----------------------------------------------------------------------------
 df['total_no'] = None
-valid_mask = df['actual_winner'] != 'Postponed'
+valid_mask = df['actual_winner'] != 'Postponed' if not df.empty else pd.Series()
 if not df.empty and valid_mask.any():
     df.loc[valid_mask, 'total_no'] = range(1, len(df[valid_mask]) + 1)
     df['total_no'] = df['total_no'].fillna('취소')
