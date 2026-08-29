@@ -54,7 +54,7 @@ st.divider()
 st.title("🏒 NHL AI 승부예측 (by 6.0 WUV predictor)")
 st.caption("6.0 WUV 기준 (수비/골리 3.0 UV + 공격/유닛 3.0 UV) | 라인업 6.0 WUV 전력 평가 | 홈 어드밴티지(+0.20 UV)")
 
-# Custom CSS (내부 스탯 노출 제거, 깔끔한 카드 스타일링)
+# Custom CSS
 st.markdown(textwrap.dedent("""
 <style>
     .match-card {
@@ -92,7 +92,7 @@ st.markdown(textwrap.dedent("""
         margin-top: 4px;
     }
     .vs-badge {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
         font-weight: 800;
         color: #64748b;
         background: #f1f5f9;
@@ -145,7 +145,7 @@ st.markdown(textwrap.dedent("""
 """), unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. NHL 32개 팀 데이터 및 6.0 WUV 계산 엔진 (내부 스탯은 비공개 산출)
+# 2. NHL 32개 팀 데이터 및 6.0 WUV 계산 엔진 (내부 스탯은 비공개)
 # -----------------------------------------------------------------------------
 TRI_TO_KOR = {
     "BOS": "보스턴 브루인스", "NYR": "뉴욕 레인저스", "FLA": "플로리다 팬서스",
@@ -247,8 +247,57 @@ def predict_matchup(home_team, away_team):
     }
 
 # -----------------------------------------------------------------------------
-# 3. 데이터베이스 로드 및 히스토리 관리
+# 3. Live NHL API 실시간 일정 연동 (비시즌 가짜 데이터 완전히 제거)
 # -----------------------------------------------------------------------------
+@st.cache_data(ttl=600)
+def fetch_live_nhl_schedule(date_str):
+    url = f"https://api-web.nhle.com/v1/schedule/{date_str}"
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            games = []
+            for gw in data.get("gameWeek", []):
+                if gw.get("date") == date_str:
+                    for g in gw.get("games", []):
+                        h_tri = g.get("homeTeam", {}).get("abbrev")
+                        a_tri = g.get("awayTeam", {}).get("abbrev")
+                        
+                        h_kor = TRI_TO_KOR.get(h_tri, g.get("homeTeam", {}).get("commonName", {}).get("default", "홈팀"))
+                        a_kor = TRI_TO_KOR.get(a_tri, g.get("awayTeam", {}).get("commonName", {}).get("default", "원정팀"))
+                        
+                        state = g.get("gameState")
+                        h_score = g.get("homeTeam", {}).get("score")
+                        a_score = g.get("awayTeam", {}).get("score")
+                        
+                        games.append({
+                            "home_team": h_kor,
+                            "away_team": a_kor,
+                            "home_tri": h_tri,
+                            "away_tri": a_tri,
+                            "state": state,
+                            "home_score": h_score,
+                            "away_score": a_score
+                        })
+            return games
+    except Exception:
+        pass
+    return []
+
+@st.cache_data(ttl=3600)
+def fetch_available_nhl_dates():
+    url = "https://api-web.nhle.com/v1/schedule/now"
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            dates = [gw.get("date") for gw in data.get("gameWeek", []) if len(gw.get("games", [])) > 0]
+            if dates:
+                return dates
+    except Exception:
+        pass
+    return ["2026-09-29"]
+
 def load_data():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -272,36 +321,9 @@ def load_data():
     """)
     conn.commit()
 
-    # 샘플 데이터 초기화 (2026-08-26 전후 시즌 샘플 데이터 연동)
-    cursor.execute("SELECT COUNT(*) FROM predictions")
-    if cursor.fetchone()[0] == 0:
-        sample_records = [
-            ("2026-08-26", "보스턴 브루인스", "뉴욕 레인저스", "보스턴 브루인스", 0.12, 4.74, 4.62, 54.1, 45.9, "3 : 2", "보스턴 브루인스", "3 : 2", 1),
-            ("2026-08-26", "플로리다 팬서스", "캐롤라이나 허리케인스", "플로리다 팬서스", 0.25, 4.90, 4.65, 58.4, 41.6, "4 : 2", "플로리다 팬서스", "4 : 1", 1),
-            ("2026-08-26", "에드먼턴 오일러스", "달라스 스타스", "에드먼턴 오일러스", 0.40, 4.98, 4.58, 63.2, 36.8, "4 : 2", "에드먼턴 오일러스", "5 : 3", 1),
-            ("2026-08-26", "토론토 메이플리프스", "탬파베이 라이트닝", "토론토 메이플리프스", 0.16, 4.80, 4.64, 55.4, 44.6, "3 : 2", "토론토 메이플리프스", "4 : 2", 1),
-            ("2026-08-26", "베가스 골든나이츠", "콜로라도 애벌랜치", "콜로라도 애벌랜치", -0.04, 4.72, 4.68, 48.6, 51.4, "2 : 3", "콜로라도 애벌랜치", "1 : 3", 1),
-            ("2026-08-26", "위니펙 제츠", "밴쿠버 캐넉스", "위니펙 제츠", 0.21, 4.76, 4.55, 57.1, 42.9, "3 : 2", "위니펙 제츠", "3 : 1", 1),
-
-            ("2026-08-27", "뉴저지 데빌스", "로스앤젤레스 킹스", "뉴저지 데빌스", 0.22, 4.68, 4.46, 57.4, 42.6, "3 : 2", "로스앤젤레스 킹스", "2 : 4", 0),
-            ("2026-08-27", "내슈빌 프레더터스", "미네소타 와일드", "내슈빌 프레더터스", 0.23, 4.65, 4.42, 57.7, 42.3, "3 : 2", "내슈빌 프레더터스", "4 : 2", 1),
-            ("2026-08-27", "뉴욕 아일랜더스", "피츠버그 펭귄스", "뉴욕 아일랜더스", 0.23, 4.58, 4.35, 57.7, 42.3, "3 : 2", "피츠버그 펭귄스", "1 : 3", 0),
-            ("2026-08-27", "워싱턴 캐피털스", "필라델피아 플라이어스", "워싱턴 캐피털스", 0.27, 4.52, 4.25, 59.0, 41.0, "4 : 2", "필라델피아 플라이어스", "2 : 3", 0),
-            ("2026-08-27", "디트로이트 레드윙스", "버팔로 세이버스", "디트로이트 레드윙스", 0.24, 4.48, 4.24, 58.1, 41.9, "3 : 2", "디트로이트 레드윙스", "3 : 1", 1),
-
-            ("2026-08-28", "오타와 세네터스", "몬트리올 카나디엔스", "오타와 세네터스", 0.35, 4.50, 4.15, 61.7, 38.3, "4 : 2", "몬트리올 카나디엔스", "2 : 4", 0),
-            ("2026-08-28", "캘거리 플레임스", "시애틀 크라켄", "캘거리 플레임스", 0.18, 4.40, 4.22, 56.1, 43.9, "3 : 2", "시애틀 크라켄", "1 : 3", 0),
-            ("2026-08-28", "세인트루이스 블루스", "유타 하키클럽", "세인트루이스 블루스", 0.23, 4.41, 4.18, 57.7, 42.3, "3 : 2", "세인트루이스 블루스", "4 : 2", 1),
-
-            ("2026-08-29", "보스턴 브루인스", "뉴욕 레인저스", "보스턴 브루인스", 0.12, 4.74, 4.62, 54.1, 45.9, "3 : 2", "보스턴 브루인스", "3 : 2", 1),
-            ("2026-08-29", "플로리다 팬서스", "캐롤라이나 허리케인스", "플로리다 팬서스", 0.25, 4.90, 4.65, 58.4, 41.6, "4 : 2", "플로리다 팬서스", "4 : 1", 1),
-            ("2026-08-29", "에드먼턴 오일러스", "달라스 스타스", "에드먼턴 오일러스", 0.40, 4.98, 4.58, 63.2, 36.8, "4 : 2", "에드먼턴 오일러스", "5 : 2", 1)
-        ]
-        cursor.executemany("""
-            INSERT INTO predictions (date, home_team, visit_team, predicted_winner, predicted_gap, home_uv, visit_uv, home_prob, visit_prob, predicted_score, actual_winner, actual_score, is_correct)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, sample_records)
-        conn.commit()
+    # 비시즌 가짜 데이터 전량 삭제 (순수 실제 경기 전용)
+    cursor.execute("DELETE FROM predictions")
+    conn.commit()
 
     df = pd.read_sql("SELECT * FROM predictions ORDER BY date ASC, id ASC", conn)
     conn.close()
@@ -310,10 +332,10 @@ def load_data():
 df = load_data()
 
 # -----------------------------------------------------------------------------
-# 1. [상단] 누적 예측 성적표 & 100경기 트래킹
+# 4. [상단] 누적 예측 성적표 & 100경기 트래킹
 # -----------------------------------------------------------------------------
 df['total_no'] = None
-valid_mask = df['actual_winner'] != 'Postponed'
+valid_mask = df['actual_winner'] != 'Postponed' if not df.empty else pd.Series()
 if not df.empty and valid_mask.any():
     df.loc[valid_mask, 'total_no'] = range(1, len(df[valid_mask]) + 1)
     df['total_no'] = df['total_no'].fillna('취소')
@@ -346,15 +368,15 @@ if total_stats > 0:
             st.metric("시스템 검증 상태", "검증 완료 (초고수 등급)")
 else:
     with col_acc:
-        st.subheader(f"전체 예측 대상 경기: `{len(df)} 경기`")
-        st.markdown("**예측 완료 경기:** 0 경기 (경기 종료 후 실시간 적중률 집계)")
+        st.subheader("전체 예측률: `-`")
+        st.markdown("**적중 경기 수:** 0 / **통산 경기 수:** 0 (NHL 시즌 개막 후 경기 종료 시 자동 집계)")
     with col_track:
-        st.metric("시스템 상태", "실시간 예측 진행 중")
+        st.metric("100경기 시스템 검증까지", "100경기 남음")
 
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 2. [중단] 일별 예측 성적표 (6단계 등급 및 라벨)
+# 5. [중단] 일별 예측 성적표 (6단계 등급 및 라벨)
 # -----------------------------------------------------------------------------
 st.header("📈 일별 예측 성적표 (최근 7일)")
 
@@ -393,7 +415,7 @@ if not stats_df.empty:
     )
     st.altair_chart((bars + text).properties(height=350), use_container_width=True)
 else:
-    st.info("💡 예정 경기 예측 완료! (경기가 종료되는 대로 실시간 적중률이 집계됩니다.)")
+    st.info("💡 현재 NHL 비시즌(휴식기)입니다. 9월 말 시범경기 및 정규시즌 개막 후 종료된 경기가 실시간으로 집계됩니다.")
 
 st.markdown(textwrap.dedent("""
 <div style="text-align: center; padding: 12px; background-color: #f0f2f6; border-radius: 10px; line-height: 1.6;">
@@ -410,64 +432,113 @@ st.markdown(textwrap.dedent("""
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 3. [하단] 일별 상세 예측 리포트 (MLB/NBA 1:1 레이아웃 복사)
+# 6. [메인] 당일 NHL 전 경기 매치업 카드 그리드 (Live API 공식 연동)
+# -----------------------------------------------------------------------------
+st.header("🏒 NHL 공식 일정 AI 승부예측 카드")
+
+available_nhl_dates = fetch_available_nhl_dates()
+default_target_date = datetime.strptime(available_nhl_dates[0], "%Y-%m-%d").date()
+
+selected_date = st.date_input("🗓️ 확인하고 싶은 경기 날짜를 선택하세요 (NHL 공식 일정 자동 연동):", value=default_target_date)
+selected_date_str = selected_date.strftime("%Y-%m-%d")
+
+# Live API 조회
+live_games = fetch_live_nhl_schedule(selected_date_str)
+
+if live_games:
+    st.markdown(f"<span class='live-badge'>📡 NHL Official API 실시간 일정 연동 중 ({selected_date_str} / {len(live_games)} 경기)</span>", unsafe_allow_html=True)
+    display_matchups = [(g['home_team'], g['away_team']) for g in live_games]
+else:
+    display_matchups = []
+
+if not display_matchups:
+    st.warning(f"⚠️ {selected_date_str} 날짜에는 예정된 NHL 경기가 없습니다. (8월은 NHL 비시즌 기간입니다. 개막 예정일: {available_nhl_dates[0]}~)")
+else:
+    grid_cols = st.columns(2)
+    
+    for idx, (home_team, away_team) in enumerate(display_matchups):
+        col_target = grid_cols[idx % 2]
+        
+        pred = predict_matchup(home_team, away_team)
+        h_tri = pred['h_tri']
+        a_tri = pred['a_tri']
+        
+        h_logo = f"https://assets.nhle.com/logos/nhl/svg/{h_tri}_light.svg"
+        a_logo = f"https://assets.nhle.com/logos/nhl/svg/{a_tri}_light.svg"
+        
+        card_html = f"""<div class="match-card">
+<div class="team-header">
+<div class="team-box">
+<img src="{a_logo}" class="team-logo" alt="{away_team}">
+<div class="team-name">{away_team}</div>
+<div style="font-size:0.78rem; color:#64748b;">(원정)</div>
+<div class="uv-score">{pred['a_wuv']:.2f} WUV</div>
+</div>
+<div style="text-align:center;">
+<span class="vs-badge">VS</span>
+<div style="font-size:0.75rem; color:#64748b; margin-top:6px;">홈어드디 +0.20</div>
+</div>
+<div class="team-box">
+<img src="{h_logo}" class="team-logo" alt="{home_team}">
+<div class="team-name">{home_team}</div>
+<div style="font-size:0.78rem; color:#64748b;">(홈)</div>
+<div class="uv-score">{pred['h_wuv']:.2f} WUV</div>
+</div>
+</div>
+<div class="prob-bar-container">
+<div class="prob-away" style="width: {pred['p_away']}%;">원정 승 {pred['p_away']}%</div>
+<div class="prob-home" style="width: {pred['p_home']}%;">홈 승 {pred['p_home']}%</div>
+</div>
+<div class="pick-badge">
+🎯 {pred['recommendation']} &nbsp;|&nbsp; 예상 스코어 ({away_team} {pred['exp_a']} : {pred['exp_h']} {home_team})
+</div>
+</div>"""
+
+        with col_target:
+            st.markdown(card_html, unsafe_allow_html=True)
+
+st.markdown("---")
+
+# -----------------------------------------------------------------------------
+# 7. [하단] 일별 상세 예측 리포트 (MLB/NBA 1:1 레이아웃)
 # -----------------------------------------------------------------------------
 st.header("📋 일별 상세 예측 리포트")
 
-df['date_dt'] = pd.to_datetime(df['date']).dt.date
-unique_dates = sorted(df['date_dt'].unique(), reverse=True)
+# 리포트용 데이터프레임 구성
+if display_matchups:
+    report_list = []
+    for idx, (h_t, a_t) in enumerate(display_matchups, 1):
+        res = predict_matchup(h_t, a_t)
+        report_list.append({
+            'No.(Day)': idx,
+            'No.(Total)': idx,
+            '홈 팀': h_t,
+            '원정 팀': a_t,
+            '예측 승리팀': res['predicted_winner'],
+            '예상 격차(uv)': f"{abs(res['gap']):.2f}",
+            '실제 승리팀': '⏳ 대기 중',
+            '적중 여부': '⏳ 대기'
+        })
+    rep_df = pd.DataFrame(report_list)
 
-default_date_target = datetime.strptime("2026-08-29", "%Y-%m-%d").date()
-default_val = default_date_target if default_date_target in unique_dates else unique_dates[0]
-
-selected_date = st.date_input("확인하고 싶은 날짜를 선택하세요:", value=default_val)
-filtered_df = df[df['date_dt'] == selected_date].copy().reset_index(drop=True)
-
-if not filtered_df.empty:
-    filtered_df['day_no'] = None
-    day_valid_mask = filtered_df['actual_winner'] != 'Postponed'
-    filtered_df.loc[day_valid_mask, 'day_no'] = range(1, len(filtered_df[day_valid_mask]) + 1)
-    filtered_df['day_no'] = filtered_df['day_no'].fillna('취소')
-
-    day_stats_mask = (filtered_df['actual_winner'] != 'Postponed') & (filtered_df['actual_winner'].notna()) & (filtered_df['actual_winner'] != '')
-    finished_games = filtered_df[day_stats_mask]
-    finished_count = len(finished_games)
-    
     col1, col2, col3 = st.columns(3)
-    col1.metric("해당일 총 경기 수", f"{len(filtered_df)} 경기")
-    col2.metric("종료된 경기", f"{finished_count} 경기")
-    if finished_count > 0:
-        acc = (finished_games['is_correct'].sum() / finished_count) * 100
-        col3.metric("일일 적중률", f"{acc:.1f}%")
-    else:
-        col3.metric("일일 적중률", "예측 완료 (대기)")
+    col1.metric("해당일 총 경기 수", f"{len(display_matchups)} 경기")
+    col2.metric("종료된 경기", "0 경기")
+    col3.metric("일일 적중률", "예측 완료 (대기)")
 
-    display_df = filtered_df[[
-        'day_no', 'total_no', 'home_team', 'visit_team', 
-        'predicted_winner', 'predicted_gap', 'actual_winner', 'is_correct'
-    ]].copy()
-    
-    display_df.columns = [
-        'No.(Day)', 'No.(Total)', '홈 팀', '원정 팀', 
-        '예측 승리팀', '예상 격차(uv)', '실제 승리팀', '적중 여부'
-    ]
-    
-    def mark_ox(row):
-        if row['실제 승리팀'] == 'Postponed': return "🆖 취소"
-        if pd.isna(row['적중 여부']) or row['실제 승리팀'] == '': return "⏳ 대기"
-        return "✅ 정답" if row['적중 여부'] == 1 else "❌ 오답"
-    
-    display_df['적중 여부'] = display_df.apply(mark_ox, axis=1)
-    display_df['예상 격차(uv)'] = display_df['예상 격차(uv)'].apply(lambda x: f"{x:.2f}")
-    display_df['실제 승리팀'] = display_df['실제 승리팀'].replace('Postponed', '취소됨').fillna('⏳ 대기 중')
-
-    st.dataframe(display_df, hide_index=True, use_container_width=True)
+    st.dataframe(rep_df, hide_index=True, use_container_width=True)
+else:
+    col1, col2, col3 = st.columns(3)
+    col1.metric("해당일 총 경기 수", "0 경기")
+    col2.metric("종료된 경기", "0 경기")
+    col3.metric("일일 적중률", "-")
+    st.info("⚠️ 해당 날짜에는 예정된 NHL 경기가 없습니다.")
 
 if st.button("데이터 새로고침"):
     st.rerun()
 
 # -----------------------------------------------------------------------------
-# 4. [최하단] 푸터 문구
+# 8. [최하단] 푸터 문구
 # -----------------------------------------------------------------------------
 st.markdown("---")
 st.markdown(
