@@ -9,7 +9,7 @@ import textwrap
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. 설정 및 데이터 로드 (순수 2026-27 시즌 전용)
+# 1. 설정 및 데이터 로드 (시즌 필터 적용)
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="NHL AI 승부 예측", page_icon="🏒", layout="wide")
 
@@ -52,8 +52,6 @@ TEAMS = {
     'CBJ': {'name': '콜럼버스 블루재키츠', 'wuv': 4.02}
 }
 
-TRI_TO_KOR = {k: v['name'] for k, v in TEAMS.items()}
-
 def get_team_wuv(team_abbr_or_name):
     if team_abbr_or_name in TEAMS:
         return TEAMS[team_abbr_or_name]['wuv']
@@ -73,7 +71,7 @@ def predict_matchup(home_team, away_team):
     pred_winner = home_team if gap >= 0 else away_team
     return pred_winner, abs(gap), h_wuv, a_wuv
 
-# NHL 공식 Web API 연동 (실시간 2026-27 일정 데이터)
+# NHL 공식 API 연동
 @st.cache_data(ttl=600)
 def fetch_live_nhl_schedule(date_str):
     url = f"https://api-web.nhle.com/v1/schedule/{date_str}"
@@ -123,6 +121,7 @@ def load_data():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            season TEXT DEFAULT '2026-27',
             date TEXT NOT NULL,
             home_team TEXT NOT NULL,
             visit_team TEXT NOT NULL,
@@ -136,7 +135,7 @@ def load_data():
     """)
     conn.commit()
     
-    # 2026-08월 비시즌 가짜 데이터 전량 삭제 (순수 2026-27 실시간 데이터 전용)
+    # 2026-08월 비시즌 샘플 데이터 전량 삭제
     cursor.execute("DELETE FROM predictions WHERE date LIKE '2026-08%'")
     conn.commit()
 
@@ -180,24 +179,42 @@ st.title("🏒 NHL AI 승부예측(by 6.0 WUV predictor)")
 st.caption("6.0 WUV 기준 (수비/골리 3.0 UV + 공격/유닛 3.0 UV) | 라인업 6.0 WUV 전력 평가 | 홈 어드밴티지(+0.20 UV)")
 
 # -----------------------------------------------------------------------------
+# 🎛️ 시즌 선택 필터 (Season Filter)
+# -----------------------------------------------------------------------------
+season_col1, season_col2 = st.columns([3, 7])
+with season_col1:
+    selected_season = st.selectbox(
+        "🏆 시즌 선택:",
+        ["2026-27 정규시즌 (현재)", "2025-26 정규시즌"],
+        index=0
+    )
+
+# 시즌 필터링 데이터
+if 'season' in df.columns and not df.empty:
+    season_key = "2026-27" if "2026-27" in selected_season else "2025-26"
+    season_df = df[df['season'] == season_key].copy()
+else:
+    season_df = df.copy()
+
+# -----------------------------------------------------------------------------
 # [통계 산출] 적중률 계산 및 필터링
 # -----------------------------------------------------------------------------
-df['total_no'] = None
-valid_mask = df['actual_winner'] != 'Postponed' if not df.empty else pd.Series()
-if not df.empty and valid_mask.any():
-    df.loc[valid_mask, 'total_no'] = range(1, len(df[valid_mask]) + 1)
-    df['total_no'] = df['total_no'].fillna('취소')
+season_df['total_no'] = None
+valid_mask = season_df['actual_winner'] != 'Postponed' if not season_df.empty else pd.Series()
+if not season_df.empty and valid_mask.any():
+    season_df.loc[valid_mask, 'total_no'] = range(1, len(season_df[valid_mask]) + 1)
+    season_df['total_no'] = season_df['total_no'].fillna('취소')
 
-stats_df = df[
-    (df['actual_winner'] != 'Postponed') & 
-    (df['actual_winner'].notna()) & 
-    (df['actual_winner'] != '')
-].copy() if not df.empty else pd.DataFrame()
+stats_df = season_df[
+    (season_df['actual_winner'] != 'Postponed') & 
+    (season_df['actual_winner'].notna()) & 
+    (season_df['actual_winner'] != '')
+].copy() if not season_df.empty else pd.DataFrame()
 
 # -----------------------------------------------------------------------------
 # 1. [상단] 누적 예측 성적표 & 100경기 트래킹
 # -----------------------------------------------------------------------------
-st.header("📊 누적 예측 성적표")
+st.header(f"📊 누적 예측 성적표 ({selected_season})")
 total_stats = len(stats_df)
 correct_total = stats_df['is_correct'].sum() if total_stats > 0 else 0
 
@@ -220,7 +237,7 @@ if total_stats > 0:
 else:
     with col_acc:
         st.subheader("전체 예측률: `-`")
-        st.markdown("**적중 경기 수:** 0 / **통산 경기 수:** 0 (2026-27 NHL 시즌 개막 후 실시간 집계)")
+        st.markdown(f"**적중 경기 수:** 0 / **통산 경기 수:** 0 ({selected_season} 경기 종료 후 실시간 집계)")
     with col_track:
         st.metric("100경기 시스템 검증까지", "100경기 남음")
 
@@ -266,7 +283,7 @@ if not stats_df.empty:
     )
     st.altair_chart((bars + text).properties(height=350), use_container_width=True)
 else:
-    st.info("💡 2026-27 NHL 정규시즌 개막 후 종료되는 경기가 실시간으로 집계됩니다.")
+    st.info(f"💡 {selected_season} 개막 후 종료되는 경기가 실시간으로 집계됩니다.")
 
 st.markdown("""
 <div style="text-align: center; padding: 12px; background-color: #f0f2f6; border-radius: 10px; line-height: 1.6;">
@@ -290,7 +307,7 @@ st.header("📋 일별 상세 예측 리포트")
 available_dates = fetch_available_nhl_dates()
 default_target_date = datetime.strptime(available_dates[0], "%Y-%m-%d").date()
 
-selected_date = st.date_input("확인하고 싶은 날짜를 선택하세요 (NHL 2026-27 개막 일정 연동):", value=default_target_date)
+selected_date = st.date_input("확인하고 싶은 날짜를 선택하세요 (NHL 공식 일정 연동):", value=default_target_date)
 selected_date_str = selected_date.strftime("%Y-%m-%d")
 
 # Live NHL API 경기 조회
@@ -336,7 +353,7 @@ else:
     col1.metric("해당일 총 경기 수", "0 경기")
     col2.metric("종료된 경기", "0 경기")
     col3.metric("일일 적중률", "-")
-    st.info(f"⚠️ {selected_date_str} 날짜에는 예정된 NHL 경기가 없습니다. (8월은 비시즌이며, 2026-27 개막 예정일: {available_dates[0]}~)")
+    st.info(f"⚠️ {selected_date_str} 날짜에는 예정된 NHL 경기가 없습니다. ({selected_season} 개막 예정일: {available_dates[0]}~)")
 
 if st.button("데이터 새로고침"):
     st.rerun()
