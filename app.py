@@ -467,7 +467,7 @@ def predict_matchup(home_team, away_team):
     }
 
 # -----------------------------------------------------------------------------
-# 3. Live NHL API 실시간 일정 조회 & 데이터베이스 관리
+# 3. Live NHL API 실시간 일정 조회 & 데이터베이스 관리 (순수 실시간 DB)
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=600)
 def fetch_live_nhl_schedule(date_str):
@@ -504,63 +504,19 @@ def fetch_live_nhl_schedule(date_str):
         pass
     return []
 
-def generate_sample_historical_predictions():
-    records = []
-    start_date = datetime.strptime("2026-08-01", "%Y-%m-%d")
-    teams_keys = list(TEAMS_DATA.keys())
-    
-    np.random.seed(42)
-    game_id_counter = 1
-    
-    for i in range(28):
-        curr_date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
-        num_games = np.random.randint(3, 7)
-        shuffled = np.random.choice(teams_keys, size=num_games*2, replace=False)
-        
-        for g in range(num_games):
-            h_team = shuffled[g*2]
-            a_team = shuffled[g*2+1]
-            
-            res = predict_matchup(h_team, a_team)
-            
-            is_correct_val = 1 if np.random.rand() < 0.58 else 0
-            if is_correct_val == 1:
-                act_winner = res["predicted_winner"]
-                act_score = f"{res['home_exp_g']} : {res['away_exp_g']}" if act_winner == h_team else f"{res['away_exp_g']} : {res['home_exp_g']}"
-            else:
-                act_winner = a_team if res["predicted_winner"] == h_team else h_team
-                act_score = f"{res['away_exp_g']} : {res['home_exp_g']}"
-
-            records.append((
-                curr_date, h_team, a_team, res["predicted_winner"],
-                res["uv_diff"], res["home_eff_wuv"], res["away_eff_wuv"],
-                res["home_win_pct"], res["away_win_pct"],
-                f"{res['home_exp_g']} : {res['away_exp_g']}",
-                act_winner, act_score, is_correct_val
-            ))
-            game_id_counter += 1
-
-    # 2026-08-29 매치업
-    today_str = "2026-08-29"
-    today_matchups = [
-        ("보스턴 브루인스", "뉴욕 레인저스"),
-        ("플로리다 팬서스", "캐롤라이나 허리케인스"),
-        ("에드먼턴 오일러스", "달라스 스타스"),
-        ("베가스 골든나이츠", "콜로라도 애벌랜치"),
-        ("토론토 메이플리프스", "탬파베이 라이트닝"),
-        ("위니펙 제츠", "밴쿠버 캐넉스")
-    ]
-    for h_team, a_team in today_matchups:
-        res = predict_matchup(h_team, a_team)
-        records.append((
-            today_str, h_team, a_team, res["predicted_winner"],
-            res["uv_diff"], res["home_eff_wuv"], res["away_eff_wuv"],
-            res["home_win_pct"], res["away_win_pct"],
-            f"{res['home_exp_g']} : {res['away_exp_g']}",
-            "", "", None
-        ))
-
-    return records
+@st.cache_data(ttl=3600)
+def fetch_available_nhl_dates():
+    url = "https://api-web.nhle.com/v1/schedule/now"
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            dates = [gw.get("date") for gw in data.get("gameWeek", []) if len(gw.get("games", [])) > 0]
+            if dates:
+                return dates
+    except Exception:
+        pass
+    return ["2026-09-29"]
 
 def load_data():
     conn = sqlite3.connect(DB_PATH)
@@ -584,16 +540,6 @@ def load_data():
         )
     """)
     conn.commit()
-
-    cursor.execute("SELECT COUNT(*) FROM predictions")
-    if cursor.fetchone()[0] == 0:
-        sample_data = generate_sample_historical_predictions()
-        cursor.executemany("""
-            INSERT INTO predictions (date, home_team, visit_team, predicted_winner, predicted_gap, home_uv, visit_uv, home_prob, visit_prob, predicted_score, actual_winner, actual_score, is_correct)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, sample_data)
-        conn.commit()
-
     df = pd.read_sql("SELECT * FROM predictions ORDER BY date ASC, id ASC", conn)
     conn.close()
     return df
@@ -605,14 +551,15 @@ df = load_data()
 # -----------------------------------------------------------------------------
 df['total_no'] = None
 valid_mask = df['actual_winner'] != 'Postponed'
-df.loc[valid_mask, 'total_no'] = range(1, len(df[valid_mask]) + 1)
-df['total_no'] = df['total_no'].fillna('취소')
+if not df.empty and valid_mask.any():
+    df.loc[valid_mask, 'total_no'] = range(1, len(df[valid_mask]) + 1)
+    df['total_no'] = df['total_no'].fillna('취소')
 
 stats_df = df[
     (df['actual_winner'] != 'Postponed') & 
     (df['actual_winner'].notna()) & 
     (df['actual_winner'] != '')
-].copy()
+].copy() if not df.empty else pd.DataFrame()
 
 st.header("📊 누적 예측 성적표")
 total_stats = len(stats_df)
@@ -636,10 +583,10 @@ if total_stats > 0:
             st.metric("시스템 검증 상태", "검증 완료 (초고수 등급)")
 else:
     with col_acc:
-        st.subheader(f"전체 예측 대상 경기: `{len(df)} 경기`")
-        st.markdown("**예측 완료 경기:** 0 경기 (경기 종료 후 실시간 적중률 집계)")
+        st.subheader("전체 예측률: `-`")
+        st.markdown("**적중 경기 수:** 0 / **통산 경기 수:** 0 (시즌 개막 후 경기 종료 시 자동 집계)")
     with col_track:
-        st.metric("시스템 상태", "실시간 예측 진행 중")
+        st.metric("100경기 시스템 검증까지", "100경기 남음")
 
 st.markdown("---")
 
@@ -683,7 +630,7 @@ if not stats_df.empty:
     )
     st.altair_chart((bars + text).properties(height=350), use_container_width=True)
 else:
-    st.info("💡 예정 경기 예측 완료! (경기가 종료되는 대로 실시간 적중률이 집계됩니다.)")
+    st.info("💡 8월은 NHL 공식 비시즌(휴식기)입니다. 9월 말 시범경기 및 정규시즌 개막 후 종료된 경기가 실시간으로 집계됩니다.")
 
 # 2-Way 벤치마크 문구
 st.markdown("""
@@ -703,32 +650,25 @@ st.markdown("---")
 # -----------------------------------------------------------------------------
 # 6. [메인] 당일 NHL 전 경기 매치업 카드 그리드 (Live API + Database)
 # -----------------------------------------------------------------------------
-st.header("🏒 NHL 당일 매치업 AI 승부예측 카드")
+st.header("🏒 NHL 공식 일정 AI 승부예측 카드")
 
-df['date_dt'] = pd.to_datetime(df['date']).dt.date
-unique_dates = sorted(df['date_dt'].unique(), reverse=True)
+available_nhl_dates = fetch_available_nhl_dates()
+default_target_date = datetime.strptime(available_nhl_dates[0], "%Y-%m-%d").date()
 
-default_date_target = datetime.strptime("2026-08-29", "%Y-%m-%d").date()
-default_val = default_date_target if default_date_target in unique_dates else unique_dates[0]
-
-selected_date = st.date_input("🗓️ 확인하고 싶은 경기 날짜를 선택하세요:", value=default_val)
+selected_date = st.date_input("🗓️ 확인하고 싶은 경기 날짜를 선택하세요 (NHL 개막 일정 자동 연동):", value=default_target_date)
 selected_date_str = selected_date.strftime("%Y-%m-%d")
 
-# Live API 조회 시도
+# Live API 조회
 live_games = fetch_live_nhl_schedule(selected_date_str)
 
 if live_games:
-    st.markdown(f"<span class='live-badge'>📡 NHL Official Live API 실시간 데이터 연동 중 ({len(live_games)} 경기)</span>", unsafe_allow_html=True)
+    st.markdown(f"<span class='live-badge'>📡 NHL Official API 실시간 일정 연동 중 ({selected_date_str} / {len(live_games)} 경기)</span>", unsafe_allow_html=True)
     display_matchups = [(g['home_team'], g['away_team']) for g in live_games]
 else:
-    filtered_df = df[df['date_dt'] == selected_date].copy().reset_index(drop=True)
-    if not filtered_df.empty:
-        display_matchups = [(r['home_team'], r['visit_team']) for _, r in filtered_df.iterrows()]
-    else:
-        display_matchups = []
+    display_matchups = []
 
 if not display_matchups:
-    st.warning(f"⚠️ {selected_date_str} 날짜에는 예정된 NHL 경기가 없습니다. (NHL 개막 일정: 2026년 9월 29일~)")
+    st.warning(f"⚠️ {selected_date_str} 날짜에는 예정된 NHL 경기가 없습니다. 상단 일자 선택기에서 NHL 일정({available_nhl_dates[0]} 등)을 선택해 주세요.")
 else:
     grid_cols = st.columns(2)
     
