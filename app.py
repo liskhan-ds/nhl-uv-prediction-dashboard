@@ -6,6 +6,7 @@ import altair as alt
 import plotly.graph_objects as go
 import os
 import requests
+import textwrap
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
@@ -55,7 +56,7 @@ st.title("🏒 NHL AI 승부예측 (by 6.0 WUV predictor)")
 st.caption("6.0 WUV 기준 (골리 1.8 UV + 탑 유닛 2.7 UV + 뎁스 유닛 1.5 UV) | 라인업 (선발 골리 + 1~4라인 F + 1~3페어 D) | 홈 어드밴티지(+0.20 UV)")
 
 # Custom CSS
-st.markdown("""
+st.markdown(textwrap.dedent("""
 <style>
     .match-card {
         background-color: #ffffff;
@@ -100,7 +101,7 @@ st.markdown("""
     }
     .goalie-box {
         background-color: #f8fafc;
-        border: 1px solid #f1f5f9;
+        border: 1px solid #e2e8f0;
         border-radius: 8px;
         padding: 10px;
         font-size: 0.85rem;
@@ -143,13 +144,13 @@ st.markdown("""
         color: white;
         font-size: 0.75rem;
         font-weight: bold;
-        padding: 2px 8px;
-        border-radius: 4px;
+        padding: 4px 10px;
+        border-radius: 6px;
         display: inline-block;
-        margin-bottom: 6px;
+        margin-bottom: 12px;
     }
 </style>
-""", unsafe_allow_html=True)
+"""), unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # 2. NHL 32개 팀 정적 지표 & 트라이코드 맵핑
@@ -467,7 +468,7 @@ def predict_matchup(home_team, away_team):
     }
 
 # -----------------------------------------------------------------------------
-# 3. Live NHL API 실시간 일정 조회 & 데이터베이스 관리 (순수 실시간 DB)
+# 3. Live NHL API 실시간 일정 조회 & 데이터베이스 관리
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=600)
 def fetch_live_nhl_schedule(date_str):
@@ -541,7 +542,6 @@ def load_data():
     """)
     conn.commit()
 
-    # 서버에 잔존하던 과거 비시즌 샘플 데이터 강제 삭제
     cursor.execute("DELETE FROM predictions WHERE date LIKE '2026-08%'")
     conn.commit()
 
@@ -638,7 +638,7 @@ else:
     st.info("💡 8월은 NHL 공식 비시즌(휴식기)입니다. 9월 말 시범경기 및 정규시즌 개막 후 종료된 경기가 실시간으로 집계됩니다.")
 
 # 2-Way 벤치마크 문구
-st.markdown("""
+st.markdown(textwrap.dedent("""
 <div style="text-align: center; padding: 12px; background-color: #f0f2f6; border-radius: 10px; line-height: 1.6;">
     <span style="color: #A020F0;">●</span> <b>신계</b> (60%↑) &nbsp;&nbsp;
     <span style="color: #FF0000;">●</span> <b>초고수/AI</b> (55%~60%) &nbsp;&nbsp;
@@ -648,7 +648,7 @@ st.markdown("""
     <span style="color: #808080;">●</span> <b>예측 금지</b> (35%↓)
     <br><small>* 52.4%는 통계적 손익분기점(Breakeven) 기준입니다.</small>
 </div>
-""", unsafe_allow_html=True)
+"""), unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -687,53 +687,49 @@ else:
         h_logo = f"https://assets.nhle.com/logos/nhl/svg/{h_info['tri']}_light.svg"
         a_logo = f"https://assets.nhle.com/logos/nhl/svg/{a_info['tri']}_light.svg"
         
+        card_html = f"""<div class="match-card">
+<div class="team-header">
+<div class="team-box">
+<img src="{a_logo}" class="team-logo" alt="{away_team}">
+<div class="team-name">{away_team}</div>
+<div style="font-size:0.78rem; color:#64748b;">(원정)</div>
+<div class="uv-score">{a_info['total_wuv']:.2f} WUV</div>
+</div>
+<div style="text-align:center;">
+<span class="vs-badge">VS</span>
+<div style="font-size:0.75rem; color:#64748b; margin-top:6px;">홈어드디 +0.20</div>
+</div>
+<div class="team-box">
+<img src="{h_logo}" class="team-logo" alt="{home_team}">
+<div class="team-name">{home_team}</div>
+<div style="font-size:0.78rem; color:#64748b;">(홈)</div>
+<div class="uv-score">{pred['home_eff_wuv']:.2f} WUV</div>
+</div>
+</div>
+<div class="goalie-box">
+<div style="font-weight:bold; margin-bottom:4px; text-align:center;">🥅 선발 골리 매치업 (골리 1.8 UV 스케일)</div>
+<div style="display:flex; justify-content:space-between;">
+<div><b>원정:</b> {a_info['goalie']['name']}<br>SV%: {a_info['goalie']['sv_pct']:.3f} | GSAx/60: +{a_info['goalie']['gsax_60']:.2f} | <b>UV: {a_info['goalie_uv']:.2f}</b></div>
+<div style="text-align:right;"><b>홈:</b> {h_info['goalie']['name']}<br>SV%: {h_info['goalie']['sv_pct']:.3f} | GSAx/60: +{h_info['goalie']['gsax_60']:.2f} | <b>UV: {h_info['goalie_uv']:.2f}</b></div>
+</div>
+</div>
+<div style="margin-top:10px; font-size:0.82rem;">
+<div style="display:flex; justify-content:space-between;">
+<span>🔥 탑 유닛 (2.7 UV): 원정 {a_info['top_unit_uv']:.2f} vs 홈 {h_info['top_unit_uv']:.2f}</span>
+<span>🛡️ 뎁스 유닛 (1.5 UV): 원정 {a_info['depth_unit_uv']:.2f} vs 홈 {h_info['depth_unit_uv']:.2f}</span>
+</div>
+</div>
+<div class="prob-bar-container">
+<div class="prob-away" style="width: {pred['away_win_pct']}%;">원정 승 {pred['away_win_pct']}%</div>
+<div class="prob-home" style="width: {pred['home_win_pct']}%;">홈 승 {pred['home_win_pct']}%</div>
+</div>
+<div class="pick-badge">
+🎯 {pred['recommendation']} &nbsp;|&nbsp; 예상 스코어 ({away_team} {pred['away_exp_g']} : {pred['home_exp_g']} {home_team})
+</div>
+</div>"""
+
         with col_target:
-            st.markdown(f"""
-            <div class="match-card">
-                <div class="team-header">
-                    <div class="team-box">
-                        <img src="{a_logo}" class="team-logo" alt="{away_team}">
-                        <div class="team-name">{away_team}</div>
-                        <div style="font-size:0.78rem; color:#64748b;">(원정)</div>
-                        <div class="uv-score">{a_info['total_wuv']:.2f} WUV</div>
-                    </div>
-                    <div style="text-align:center;">
-                        <span class="vs-badge">VS</span>
-                        <div style="font-size:0.75rem; color:#64748b; margin-top:6px;">홈어드디 +0.20</div>
-                    </div>
-                    <div class="team-box">
-                        <img src="{h_logo}" class="team-logo" alt="{home_team}">
-                        <div class="team-name">{home_team}</div>
-                        <div style="font-size:0.78rem; color:#64748b;">(홈)</div>
-                        <div class="uv-score">{pred['home_eff_wuv']:.2f} WUV</div>
-                    </div>
-                </div>
-                
-                <div class="goalie-box">
-                    <div style="font-weight:bold; margin-bottom:4px; text-align:center;">🥅 선발 골리 매치업 (골리 1.8 UV 스케일)</div>
-                    <div style="display:flex; justify-content:space-between;">
-                        <div><b>원정:</b> {a_info['goalie']['name']} <br>SV%: {a_info['goalie']['sv_pct']:.3f} | GSAx/60: +{a_info['goalie']['gsax_60']:.2f} | <b>UV: {a_info['goalie_uv']:.2f}</b></div>
-                        <div style="text-align:right;"><b>홈:</b> {h_info['goalie']['name']} <br>SV%: {h_info['goalie']['sv_pct']:.3f} | GSAx/60: +{h_info['goalie']['gsax_60']:.2f} | <b>UV: {h_info['goalie_uv']:.2f}</b></div>
-                    </div>
-                </div>
-
-                <div style="margin-top:10px; font-size:0.82rem;">
-                    <div style="display:flex; justify-content:space-between;">
-                        <span>🔥 탑 유닛 (2.7 UV): 원정 {a_info['top_unit_uv']:.2f} vs 홈 {h_info['top_unit_uv']:.2f}</span>
-                        <span>🛡️ 뎁스 유닛 (1.5 UV): 원정 {a_info['depth_unit_uv']:.2f} vs 홈 {h_info['depth_unit_uv']:.2f}</span>
-                    </div>
-                </div>
-
-                <div class="prob-bar-container">
-                    <div class="prob-away" style="width: {pred['away_win_pct']}%;">원정 승 {pred['away_win_pct']}%</div>
-                    <div class="prob-home" style="width: {pred['home_win_pct']}%;">홈 승 {pred['home_win_pct']}%</div>
-                </div>
-
-                <div class="pick-badge">
-                    🎯 {pred['recommendation']} &nbsp;|&nbsp; 예상 스코어 ({away_team} {pred['away_exp_g']} : {pred['home_exp_g']} {home_team})
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(card_html, unsafe_allow_html=True)
 
 st.markdown("---")
 
