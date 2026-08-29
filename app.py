@@ -18,38 +18,38 @@ DB_PATH = os.path.join(BASE_DIR, "nhl_data.db")
 
 # 6.0 WUV NHL 32개 전 구단 2026-27 시즌 전력 지표 데이터베이스
 TEAMS = {
-    'BOS': {'name': '보스턴 브루인스', 'wuv': 4.54},
-    'NYR': {'name': '뉴욕 레인저스', 'wuv': 4.62},
-    'FLA': {'name': '플로리다 팬서스', 'wuv': 4.70},
-    'CAR': {'name': '캐롤라이나 허리케인스', 'wuv': 4.65},
-    'EDM': {'name': '에드먼턴 오일러스', 'wuv': 4.78},
-    'DAL': {'name': '달라스 스타스', 'wuv': 4.58},
-    'COL': {'name': '콜로라도 애벌랜치', 'wuv': 4.68},
-    'VGK': {'name': '베가스 골든나이츠', 'wuv': 4.52},
-    'TOR': {'name': '토론토 메이플리프스', 'wuv': 4.60},
-    'TBL': {'name': '탬파베이 라이트닝', 'wuv': 4.64},
-    'WPG': {'name': '위니펙 제츠', 'wuv': 4.56},
-    'VAN': {'name': '밴쿠버 캐넉스', 'wuv': 4.55},
-    'NJD': {'name': '뉴저지 데빌스', 'wuv': 4.48},
-    'LAK': {'name': '로스앤젤레스 킹스', 'wuv': 4.46},
-    'NSH': {'name': '내슈빌 프레더터스', 'wuv': 4.45},
-    'MIN': {'name': '미네소타 와일드', 'wuv': 4.42},
-    'NYI': {'name': '뉴욕 아일랜더스', 'wuv': 4.38},
-    'PIT': {'name': '피츠버그 펭귄스', 'wuv': 4.35},
-    'WSH': {'name': '워싱턴 캐피털스', 'wuv': 4.32},
-    'PHI': {'name': '필라델피아 플라이어스', 'wuv': 4.25},
-    'DET': {'name': '디트로이트 레드윙스', 'wuv': 4.28},
-    'BUF': {'name': '버팔로 세이버스', 'wuv': 4.24},
-    'OTT': {'name': '오타와 세네터스', 'wuv': 4.30},
-    'MTL': {'name': '몬트리올 카나디엔스', 'wuv': 4.15},
-    'CGY': {'name': '캘거리 플레임스', 'wuv': 4.20},
-    'SEA': {'name': '시애틀 크라켄', 'wuv': 4.22},
-    'STL': {'name': '세인트루이스 블루스', 'wuv': 4.21},
-    'UTA': {'name': '유타 하키클럽', 'wuv': 4.18},
-    'CHI': {'name': '시카고 블랙호크스', 'wuv': 4.08},
-    'ANA': {'name': '애너하임 덕스', 'wuv': 4.05},
-    'SJS': {'name': '산호세 샤크스', 'wuv': 3.95},
-    'CBJ': {'name': '콜럼버스 블루재키츠', 'wuv': 4.02}
+    'EDM': {'name': '에드먼턴 오일러스', 'wuv': 6.82},
+    'FLA': {'name': '플로리다 팬서스', 'wuv': 6.72},
+    'COL': {'name': '콜로라도 애벌랜치', 'wuv': 6.68},
+    'CAR': {'name': '캐롤라이나 허리케인스', 'wuv': 6.65},
+    'TBL': {'name': '탬파베이 라이트닝', 'wuv': 6.62},
+    'NYR': {'name': '뉴욕 레인저스', 'wuv': 6.60},
+    'TOR': {'name': '토론토 메이플리프스', 'wuv': 6.56},
+    'DAL': {'name': '달라스 스타스', 'wuv': 6.52},
+    'WPG': {'name': '위니펙 제츠', 'wuv': 6.48},
+    'VAN': {'name': '밴쿠버 캐넉스', 'wuv': 6.45},
+    'BOS': {'name': '보스턴 브루인스', 'wuv': 6.42},
+    'VGK': {'name': '베가스 골든나이츠', 'wuv': 6.38},
+    'NJD': {'name': '뉴저지 데빌스', 'wuv': 6.32},
+    'LAK': {'name': '로스앤젤레스 킹스', 'wuv': 6.28},
+    'NSH': {'name': '내슈빌 프레더터스', 'wuv': 6.24},
+    'MIN': {'name': '미네소타 와일드', 'wuv': 6.18},
+    'NYI': {'name': '뉴욕 아일랜더스', 'wuv': 6.12},
+    'PIT': {'name': '피츠버그 펭귄스', 'wuv': 6.08},
+    'WSH': {'name': '워싱턴 캐피털스', 'wuv': 6.02},
+    'OTT': {'name': '오타와 세네터스', 'wuv': 5.95},
+    'DET': {'name': '디트로이트 레드윙스', 'wuv': 5.90},
+    'PHI': {'name': '필라델피아 플라이어스', 'wuv': 5.85},
+    'BUF': {'name': '버팔로 세이버스', 'wuv': 5.80},
+    'SEA': {'name': '시애틀 크라켄', 'wuv': 5.75},
+    'STL': {'name': '세인트루이스 블루스', 'wuv': 5.70},
+    'CGY': {'name': '캘거리 플레임스', 'wuv': 5.65},
+    'UTA': {'name': '유타 하키클럽', 'wuv': 5.60},
+    'MTL': {'name': '몬트리올 카나디엔스', 'wuv': 5.52},
+    'CHI': {'name': '시카고 블랙호크스', 'wuv': 5.42},
+    'ANA': {'name': '애너하임 덕스', 'wuv': 5.35},
+    'CBJ': {'name': '콜럼버스 블루재키츠', 'wuv': 5.28},
+    'SJS': {'name': '산호세 샤크스', 'wuv': 5.15}
 }
 
 def get_team_wuv(team_abbr_or_name):
@@ -58,7 +58,7 @@ def get_team_wuv(team_abbr_or_name):
     for k, v in TEAMS.items():
         if v['name'] == team_abbr_or_name:
             return v['wuv']
-    return 4.20
+    return 6.00
 
 def predict_matchup(home_team, away_team):
     h_base = get_team_wuv(home_team)
