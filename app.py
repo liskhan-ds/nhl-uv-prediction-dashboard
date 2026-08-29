@@ -319,6 +319,7 @@ if live_games:
         h_t = g['home_team']
         a_t = g['visit_team']
         pred_w, gap, h_uv, a_uv = predict_matchup(h_t, a_t)
+        pred_wuv = h_uv if pred_w == h_t else a_uv
         
         act_w = g.get('home_team') if g.get('state') == 'OFF' and g.get('home_score', 0) > g.get('away_score', 0) else (g.get('visit_team') if g.get('state') == 'OFF' else '')
         is_corr = 1 if act_w == pred_w else (0 if act_w != '' else None)
@@ -330,9 +331,9 @@ if live_games:
         report_list.append({
             'No.(Day)': idx,
             'No.(Total)': idx,
-            '홈 팀': h_t,
-            '원정 팀': a_t,
-            '예측 승리팀': pred_w,
+            '홈 팀': f"{h_t}({h_uv:.2f})",
+            '원정 팀': f"{a_t}({a_uv:.2f})",
+            '예측 승리팀': f"{pred_w}({pred_wuv:.2f})",
             '예상 격차(uv)': f"{gap:.2f}",
             '실제 승리팀': act_w if act_w != '' else '⏳ 대기 중',
             '적중 여부': status_str
