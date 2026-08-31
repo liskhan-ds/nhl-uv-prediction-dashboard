@@ -347,7 +347,8 @@ if live_games:
     col2.metric("종료된 경기", f"{finished_count} 경기")
     col3.metric("일일 적중률", "예측 완료 (대기)" if finished_count == 0 else f"{(sum([1 for r in report_list if r['적중 여부']=='✅ 정답'])/finished_count)*100:.1f}%")
 
-    st.dataframe(rep_df, hide_index=True, use_container_width=True)
+    table_height = max(400, (len(rep_df) + 1) * 38 + 25)
+    st.dataframe(rep_df, hide_index=True, use_container_width=True, height=table_height)
 else:
     col1, col2, col3 = st.columns(3)
     col1.metric("해당일 총 경기 수", "0 경기")
